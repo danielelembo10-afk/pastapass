@@ -1,5 +1,5 @@
 // ==============================
-// 🍝 Pasta Factory A Mare – PastaPass Server
+// 🍝 Pasta Factory A Mare – PastaPass Server (Turso-enabled)
 // ==============================
 
 import path from "path";
@@ -9,110 +9,172 @@ import "dotenv/config";
 import express from "express";
 import bodyParser from "body-parser";
 import cors from "cors";
+
+// DB: Turso (cloud SQLite) or local SQLite
 import Database from "better-sqlite3";
+import { createClient as createTurso } from "@libsql/client";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// --- Config ---
 const PORT = process.env.PORT || 3000;
-const QR_SECRET = process.env.QR_SECRET || "PASTA123"; // static secret for printed QR
+const QR_SECRET = process.env.QR_SECRET || "PASTA123";
+const useTurso = !!process.env.TURSO_DATABASE_URL;
 
 function isValidStaticToken(t) {
   return t && String(t) === String(QR_SECRET);
 }
 
+// --- Express ---
 const app = express();
 app.use(cors());
 app.use(bodyParser.json());
 
+// --- Static files ---
 const WEB_DIR = path.join(__dirname, "..", "web");
 const ASSETS_DIR = path.join(WEB_DIR, "assets");
-
-console.log("🔎 WEB_DIR:", WEB_DIR);
-console.log("🔎 ASSETS_DIR:", ASSETS_DIR);
-
 app.use(express.static(WEB_DIR));
 app.use("/assets", express.static(ASSETS_DIR));
+// optional: allow /web/mobile.html too
+app.use("/web", express.static(WEB_DIR));
 
-// --- Database setup ---
-const DATA_DIR = path.join(__dirname, "..", "data");
-if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-const dbPath = path.join(DATA_DIR, "pasta.sqlite");
-const db = new Database(dbPath);
+// --- DB init (Turso if set, else local file) ---
+let turso = null;
+let sqlite = null;
+let dbGetOne, dbRun, dbAll, initSchema;
 
-db.exec(`
-CREATE TABLE IF NOT EXISTS customers (
-  id TEXT PRIMARY KEY,
-  name TEXT,
-  email TEXT UNIQUE,
-  phone TEXT UNIQUE,
-  created_at TEXT
-);
+if (useTurso) {
+  turso = createTurso({
+    url: process.env.TURSO_DATABASE_URL,
+    authToken: process.env.TURSO_AUTH_TOKEN,
+  });
 
-CREATE TABLE IF NOT EXISTS wallets (
-  customer_id TEXT PRIMARY KEY,
-  stamps INTEGER DEFAULT 0,
-  last_redeemed_at TEXT,
-  FOREIGN KEY(customer_id) REFERENCES customers(id)
-);
-`);
+  dbRun = async (sql, args = []) => { await turso.execute({ sql, args }); };
+  dbGetOne = async (sql, args = []) => {
+    const r = await turso.execute({ sql, args });
+    return r.rows?.[0] || null;
+  };
+  dbAll = async (sql, args = []) => {
+    const r = await turso.execute({ sql, args });
+    return r.rows || [];
+  };
+  initSchema = async () => {
+    await dbRun(`
+      CREATE TABLE IF NOT EXISTS customers (
+        id TEXT PRIMARY KEY,
+        name TEXT,
+        email TEXT UNIQUE,
+        phone TEXT UNIQUE,
+        created_at TEXT
+      )
+    `);
+    await dbRun(`
+      CREATE TABLE IF NOT EXISTS wallets (
+        customer_id TEXT PRIMARY KEY,
+        stamps INTEGER DEFAULT 0,
+        last_redeemed_at TEXT,
+        FOREIGN KEY(customer_id) REFERENCES customers(id)
+      )
+    `);
+  };
+} else {
+  const DATA_DIR = path.join(__dirname, "..", "data");
+  if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+  const dbPath = path.join(DATA_DIR, "pasta.sqlite");
+  sqlite = new Database(dbPath);
 
-const getCustomer = db.prepare(`
-  SELECT id, name, email, phone FROM customers
-  WHERE email = @identifier OR phone = @identifier
-  LIMIT 1;
-`);
-const createCustomer = db.prepare(`
-  INSERT INTO customers (id, name, email, phone, created_at)
-  VALUES (@id, @name, @email, @phone, @created_at);
-`);
-const getWallet = db.prepare(`
-  SELECT customer_id, stamps, last_redeemed_at
-  FROM wallets
-  WHERE customer_id = @customer_id
-  LIMIT 1;
-`);
-const createWallet = db.prepare(`
-  INSERT INTO wallets (customer_id, stamps, last_redeemed_at)
-  VALUES (@customer_id, 0, NULL);
-`);
-const updateWallet = db.prepare(`
-  UPDATE wallets
-  SET stamps = @stamps, last_redeemed_at = @last_redeemed_at
-  WHERE customer_id = @customer_id;
-`);
+  dbRun = async (sql, args = []) => sqlite.prepare(sql).run(args);
+  dbGetOne = async (sql, args = []) => sqlite.prepare(sql).get(args) || null;
+  dbAll = async (sql, args = []) => sqlite.prepare(sql).all(args);
+  initSchema = async () => {
+    sqlite.exec(`
+      CREATE TABLE IF NOT EXISTS customers (
+        id TEXT PRIMARY KEY,
+        name TEXT,
+        email TEXT UNIQUE,
+        phone TEXT UNIQUE,
+        created_at TEXT
+      );
+      CREATE TABLE IF NOT EXISTS wallets (
+        customer_id TEXT PRIMARY KEY,
+        stamps INTEGER DEFAULT 0,
+        last_redeemed_at TEXT,
+        FOREIGN KEY(customer_id) REFERENCES customers(id)
+      );
+    `);
+  };
+}
 
-// ========== API ROUTES ==========
+// --- Data helpers ---
+async function getCustomerByIdentifier(identifier) {
+  return await dbGetOne(
+    `SELECT id, name, email, phone
+     FROM customers
+     WHERE email = ? OR phone = ?
+     LIMIT 1`,
+    [identifier, identifier]
+  );
+}
+async function createCustomer({ id, name, email, phone }) {
+  await dbRun(
+    `INSERT INTO customers (id, name, email, phone, created_at)
+     VALUES (?, ?, ?, ?, ?)`,
+    [id, name, email, phone, new Date().toISOString()]
+  );
+}
+async function getWallet(customerId) {
+  return await dbGetOne(
+    `SELECT customer_id, stamps, last_redeemed_at
+     FROM wallets
+     WHERE customer_id = ?
+     LIMIT 1`,
+    [customerId]
+  );
+}
+async function createWallet(customerId) {
+  await dbRun(
+    `INSERT INTO wallets (customer_id, stamps, last_redeemed_at)
+     VALUES (?, 0, NULL)`,
+    [customerId]
+  );
+}
+async function updateWallet({ customerId, stamps, lastRedeemedAt }) {
+  await dbRun(
+    `UPDATE wallets
+     SET stamps = ?, last_redeemed_at = ?
+     WHERE customer_id = ?`,
+    [stamps, lastRedeemedAt, customerId]
+  );
+}
 
-// Sign up
-app.post("/api/signup", (req, res) => {
+// ==============================
+// API ROUTES
+// ==============================
+
+// Signup
+app.post("/api/signup", async (req, res) => {
   try {
     const { name = null, email = null, phone = null } = req.body || {};
     const identifier = email || phone;
     if (!identifier) return res.status(400).json({ error: "Missing email or phone" });
 
-    let customer = getCustomer.get({ identifier });
+    let customer = await getCustomerByIdentifier(identifier);
     if (!customer) {
       const id = identifier;
-      createCustomer.run({
-        id,
-        name,
-        email: email || null,
-        phone: phone || null,
-        created_at: new Date().toISOString(),
-      });
-      customer = getCustomer.get({ identifier });
+      await createCustomer({ id, name, email: email || null, phone: phone || null });
+      customer = await getCustomerByIdentifier(identifier);
     }
 
-    let wallet = getWallet.get({ customer_id: customer.id });
+    let wallet = await getWallet(customer.id);
     if (!wallet) {
-      createWallet.run({ customer_id: customer.id });
+      await createWallet(customer.id);
       wallet = { customer_id: customer.id, stamps: 0, last_redeemed_at: null };
     }
 
     res.json({
       customer: { id: customer.id, name: customer.name, email: customer.email, phone: customer.phone },
-      wallet: { stamps: wallet.stamps },
+      wallet: { stamps: wallet.stamps || 0 },
     });
   } catch (e) {
     console.error(e);
@@ -120,29 +182,28 @@ app.post("/api/signup", (req, res) => {
   }
 });
 
-// Add stamp via static QR token
-app.post("/api/stamps/add", (req, res) => {
+// Add stamp via static QR secret
+app.post("/api/stamps/add", async (req, res) => {
   try {
     const { identifier, token } = req.body || {};
     if (!isValidStaticToken(token)) return res.status(401).json({ error: "Unauthorized: invalid token" });
     if (!identifier) return res.status(400).json({ error: "Missing identifier (email or phone)" });
 
-    let customer = getCustomer.get({ identifier });
+    let customer = await getCustomerByIdentifier(identifier);
     if (!customer) {
       const id = identifier;
-      createCustomer.run({
+      await createCustomer({
         id,
         name: null,
         email: identifier.includes("@") ? identifier : null,
         phone: identifier.includes("@") ? null : identifier,
-        created_at: new Date().toISOString(),
       });
-      customer = getCustomer.get({ identifier });
+      customer = await getCustomerByIdentifier(identifier);
     }
 
-    let wallet = getWallet.get({ customer_id: customer.id });
+    let wallet = await getWallet(customer.id);
     if (!wallet) {
-      createWallet.run({ customer_id: customer.id });
+      await createWallet(customer.id);
       wallet = { customer_id: customer.id, stamps: 0, last_redeemed_at: null };
     }
 
@@ -155,11 +216,11 @@ app.post("/api/stamps/add", (req, res) => {
       if (stamps === 10) {
         rewardMessage = "🎉 Congratulations — you’ve earned a FREE pasta for being a loyal customer!";
       }
-      updateWallet.run({ customer_id: customer.id, stamps, last_redeemed_at: wallet.last_redeemed_at });
+      await updateWallet({ customerId: customer.id, stamps, lastRedeemedAt: wallet.last_redeemed_at });
     } else {
       stamps = 0;
       redeemedNow = true;
-      updateWallet.run({ customer_id: customer.id, stamps, last_redeemed_at: new Date().toISOString() });
+      await updateWallet({ customerId: customer.id, stamps, lastRedeemedAt: new Date().toISOString() });
     }
 
     res.json({ customerId: customer.id, stamps, redeemed: redeemedNow, rewardMessage });
@@ -174,7 +235,10 @@ app.get("/api/wallet/apple/:id.pkpass", (req, res) => {
   res.status(501).json({ error: "Apple Wallet pass signing not configured yet." });
 });
 
-// Start server
+// ---- bootstrap ----
+await initSchema();
+
 app.listen(PORT, () => {
   console.log(`✅ PastaPass running at http://localhost:${PORT}`);
+  console.log(useTurso ? "🗄 Using Turso (cloud SQLite)" : "💾 Using local SQLite file");
 });
