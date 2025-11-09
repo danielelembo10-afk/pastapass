@@ -73,6 +73,9 @@
   </div>
 
   <script>
+    // Point API to your Render URL so this page can be hosted anywhere
+    const API = 'https://pastapass.onrender.com';
+
     const pastaSVG = `<svg viewBox="0 0 24 24"><path class="pasta" d="M4 12c0-3.3 3.1-6 6.9-6 2.1 0 4 .8 5.2 2 .3.3.3.8 0 1.1-.3.3-.8.3-1.1 0-1-1-2.5-1.6-4.1-1.6-3 0-5.4 1.9-5.4 4.3s2.4 4.3 5.4 4.3c1.6 0 3.1-.6 4.1-1.6.3-.3.8-.3 1.1 0 .3.3.3.8 0 1.1-1.2 1.2-3.1 2-5.2 2C7.1 18 4 15.3 4 12zM14 8c.4 0 .8.3.8.8S14.4 9.5 14 9.5s-.8-.3-.8-.8.3-.7.8-.7zm2.8 3.2c.4 0 .8.3.8.8s-.3.8-.8.8-.8-.3-.8-.8.4-.8.8-.8z"/></svg>`;
     const signupCard=document.getElementById('signupCard');
     const walletCard=document.getElementById('walletCard');
@@ -95,11 +98,11 @@
     function setIdentifier(id){localStorage.setItem('pastapass_id',id);}
 
     async function apiSignup(payload){
-      const r=await fetch('/api/signup',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+      const r=await fetch(`${API}/api/signup`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
       const j=await r.json(); if(!r.ok) throw new Error(j.error||'signup failed'); return j;
     }
     async function apiAddStamp(identifier,token){
-      const r=await fetch('/api/stamps/add',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({identifier,token})});
+      const r=await fetch(`${API}/api/stamps/add`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({identifier,token})});
       const j=await r.json(); if(!r.ok) throw new Error(j.error||'add stamp failed'); return j;
     }
     function stripHashOnce(){
@@ -110,7 +113,7 @@
       signupCard.style.display='none';
       walletCard.style.display='block';
       renderPlates(stamps||0);
-      document.getElementById('applewallet').href='/api/wallet/apple/'+id+'.pkpass';
+      document.getElementById('applewallet').href=`${API}/api/wallet/apple/${id}.pkpass`;
       document.getElementById('wallet').style.display='block';
     }
 
