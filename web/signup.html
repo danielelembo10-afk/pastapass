@@ -1,0 +1,243 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>PastaPass — Join</title>
+  <link rel="icon" href="/assets/logo.png">
+  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@600;800;900&display=swap" rel="stylesheet">
+
+  <style>
+    :root {
+      --flag-red: #d32f2f;
+      --flag-white: #ffffff;
+      --flag-green: #1b8f3a;
+      --gold: #f1c40f;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: Montserrat, system-ui, -apple-system, Segoe UI, Roboto, Arial;
+      background: linear-gradient(
+        90deg,
+        var(--flag-green) 0 33.33%,
+        var(--flag-white) 33.33% 66.66%,
+        var(--flag-red) 66.66% 100%
+      );
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-start;
+    }
+
+    /* --- LOGO --- */
+    header {
+      padding: 24px 0;
+      text-align: center;
+    }
+
+    header img {
+      width: min(90vw, 540px);
+      height: auto;
+      display: inline-block;
+      background: none !important;
+      border: none !important;
+      outline: none !important;
+      box-shadow: none !important;
+      filter: none !important;
+    }
+
+    /* --- PAGE --- */
+    .page {
+      display: flex;
+      justify-content: center;
+      width: 100%;
+      padding: 20px;
+    }
+
+    .card {
+      width: 100%;
+      max-width: 520px;
+      background: #111;
+      color: #eee;
+      border: 1px solid #ffffff22;
+      border-radius: 18px;
+      padding: 20px;
+    }
+
+    label {
+      display: block;
+      margin: 10px 0 6px;
+      font-weight: 800;
+    }
+
+    input {
+      width: 100%;
+      padding: 12px;
+      border-radius: 10px;
+      border: 1px solid #444;
+      background: #181818;
+      color: #fff;
+    }
+
+    button {
+      margin-top: 12px;
+      padding: 12px 16px;
+      border: 0;
+      border-radius: 12px;
+      background: #fff;
+      color: #000;
+      font-weight: 900;
+      cursor: pointer;
+      width: 100%;
+    }
+
+    .muted {
+      color: #bbb;
+      font-size: 13px;
+    }
+
+    .plates {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 6px;
+    }
+
+    .plate {
+      width: 34px;
+      height: 34px;
+      border-radius: 50%;
+      background: #000;
+      border: 1px solid #555;
+      display: grid;
+      place-items: center;
+    }
+
+    .plate svg {
+      width: 22px;
+      height: 22px;
+    }
+
+    .plate .pasta {
+      fill: #7a7a7a;
+    }
+
+    .plate.earned .pasta {
+      fill: var(--gold);
+    }
+
+    .wallet {
+      display: none;
+      margin-top: 12px;
+      font-weight: 800;
+    }
+
+    .wallet a {
+      color: #fff;
+      text-decoration: none;
+      padding: 10px 12px;
+      background: #1b8f3a;
+      border-radius: 10px;
+    }
+
+    /* Force remove any hidden leftover glow from previous CSS */
+    .logo-wrap, .logo-pill, .logo-img, header img {
+      background: none !important;
+      box-shadow: none !important;
+      filter: none !important;
+    }
+  </style>
+</head>
+
+<body>
+  <!-- Logo -->
+  <header>
+    <img src="/assets/logo.png" alt="logo">
+  </header>
+
+  <!-- Signup Form -->
+  <div class="page">
+    <div class="card">
+      <p class="muted">🍝 PastaPass 10+1 — buy 10 pastas, get 1 free!</p>
+
+      <label>Name</label>
+      <input id="name" placeholder="Your name">
+
+      <label>Email</label>
+      <input id="email" placeholder="your@email.com">
+
+      <label>Phone</label>
+      <input id="phone" placeholder="+358 ...">
+
+      <label><input type="checkbox" id="consentMarketing"> I agree to receive PastaPass updates and offers.</label>
+      <label><input type="checkbox" id="consentLocation"> I agree to location-based reminders (opt-out anytime).</label>
+
+      <button onclick="signup()">Join PastaPass</button>
+      <div id="out" class="muted" style="margin-top:10px;"></div>
+      <div id="plates" class="plates" aria-live="polite"></div>
+
+      <div id="wallet" class="wallet">
+        <a id="applewallet" href="#" download>Add to Apple Wallet</a>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const pastaSVG = `
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path class="pasta" d="M4 12c0-3.3 3.1-6 6.9-6 2.1 0 4 .8 5.2 2 .3.3.3.8 0 1.1-.3.3-.8.3-1.1 0-1-1-2.5-1.6-4.1-1.6-3 0-5.4 1.9-5.4 4.3s2.4 4.3 5.4 4.3c1.6 0 3.1-.6 4.1-1.6.3-.3.8-.3 1.1 0 .3.3.3.8 0 1.1-1.2 1.2-3.1 2-5.2 2C7.1 18 4 15.3 4 12zM14 8c.4 0 .8.3.8.8S14.4 9.5 14 9.5s-.8-.3-.8-.8.3-.7.8-.7zm2.8 3.2c.4 0 .8.3.8.8s-.3.8-.8.8-.8-.3-.8-.8.4-.8.8-.8z"/>
+      </svg>`;
+
+    function renderPlates(stamps) {
+      const total = 10;
+      const el = document.getElementById('plates');
+      el.innerHTML = '';
+      for (let i = 0; i < total; i++) {
+        const d = document.createElement('div');
+        d.className = 'plate' + (i < stamps ? ' earned' : '');
+        d.innerHTML = pastaSVG;
+        el.appendChild(d);
+      }
+    }
+
+    async function signup() {
+      const body = {
+        name: name.value || null,
+        email: email.value || null,
+        phone: phone.value || null,
+        consentMarketing: document.getElementById('consentMarketing').checked,
+        consentLocation: document.getElementById('consentLocation').checked
+      };
+
+      const r = await fetch('/api/signup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+
+      const j = await r.json();
+      if (!r.ok) {
+        out.textContent = 'Error: ' + (j.error || 'unknown');
+        return;
+      }
+
+      out.textContent = 'Welcome! Wallet ID: ' + j.customer.id + ' — Stamps: ' + j.wallet.stamps;
+      renderPlates(j.wallet.stamps || 0);
+
+      const w = document.getElementById('wallet');
+      const a = document.getElementById('applewallet');
+      a.href = '/api/wallet/apple/' + j.customer.id + '.pkpass';
+      w.style.display = 'block';
+    }
+
+    renderPlates(0);
+  </script>
+</body>
+</html>

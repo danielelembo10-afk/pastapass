@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>PastaPass — QR</title>
+  <link rel="icon" href="/assets/logo.png">
+  <style>
+    :root{ --green:#1b8f3a; --white:#fff; --red:#d32f2f; }
+    *{box-sizing:border-box}
+    body{
+      margin:0;
+      background: linear-gradient(90deg,var(--green) 0 33.33%, var(--white) 33.33% 66.66%, var(--red) 66.66% 100%);
+      min-height:100vh; display:flex; align-items:center; justify-content:center; padding:20px;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial;
+    }
+    .wrap{display:flex; flex-direction:column; align-items:center; gap:16px; background:#000000a0; padding:18px; border-radius:18px}
+    .logo{width:min(90vw,520px); height:auto; display:block;}
+    .qr{background:#fff; border-radius:12px; width:min(80vw,320px); height:min(80vw,320px); object-fit:contain}
+    .muted{color:#eaeaea; opacity:.9}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <img class="logo" src="/assets/logo.png" alt="logo">
+    <img id="qr" class="qr" alt="QR">
+    <div id="meta" class="muted">Refreshing…</div>
+  </div>
+
+  <script>
+    async function refreshQR(){
+      try{
+        const r = await fetch('/api/staff/rotating-token');
+        const j = await r.json();
+        const token = j.token;
+        const expires = j.validForSeconds || 30;
+
+        const BASE = 'http://192.168.1.58:3000'; // e.g. http://192.168.1.25:3000
+const url = BASE + '/web/mobile.html#' + encodeURIComponent(token);
+ document.getElementById('qr').src =
+          'https://api.qrserver.com/v1/create-qr-code/?size=320x320&data=' + encodeURIComponent(url);
+        document.getElementById('meta').textContent = 'Scan to stamp — refreshes every ~' + expires + 's';
+      } catch(e){
+        document.getElementById('meta').textContent = 'Could not load QR. Check internet.';
+      }
+    }
+    refreshQR();
+    setInterval(refreshQR, 15000);
+  </script>
+</body>
+</html>

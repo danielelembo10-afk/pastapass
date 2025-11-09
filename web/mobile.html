@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
+  <title>PastaPass — Mobile</title>
+  <link rel="icon" href="/assets/logo.png">
+  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@600;800;900&display=swap" rel="stylesheet">
+
+  <style>
+    :root{ 
+      --green:#1b8f3a; 
+      --white:#ffffff; 
+      --red:#d32f2f; 
+      --gold:#f1c40f; 
+    }
+
+    *{box-sizing:border-box;margin:0;padding:0}
+
+    body{
+      font-family:Montserrat,system-ui,-apple-system,Segoe UI,Roboto,Arial;
+      background:linear-gradient(90deg,var(--green) 0 33.33%, var(--white) 33.33% 66.66%, var(--red) 66.66% 100%);
+      min-height:100vh;
+      display:flex;
+      flex-direction:column;
+      align-items:center;
+    }
+
+    header{
+      padding:16px 8px;
+      text-align:center;
+    }
+
+    header img{
+      width:min(90vw,540px);
+      height:auto;
+      display:inline-block;
+      background:none!important;
+      box-shadow:none!important;
+      filter:none!important;
+    }
+
+    .card{
+      width:100%;
+      max-width:560px;
+      background:#111;
+      color:#eee;
+      border:1px solid #ffffff22;
+      border-radius:18px;
+      padding:16px;
+      margin:12px;
+    }
+
+    label{display:block;margin:10px 0 6px;font-weight:800}
+    input{
+      width:100%;
+      padding:12px;
+      border-radius:10px;
+      border:1px solid #444;
+      background:#181818;
+      color:#fff;
+    }
+
+    button{
+      margin-top:12px;
+      padding:12px 16px;
+      border:0;
+      border-radius:12px;
+      background:#fff;
+      color:#000;
+      font-weight:900;
+      cursor:pointer;
+      width:100%;
+    }
+
+    .muted{color:#bbb;font-size:13px}
+
+    /* --- PERFECT 2x5 GRID --- */
+    .plates{
+      display: grid !important;
+      grid-template-columns: repeat(5, 44px) !important;
+      grid-auto-rows: 44px !important;
+      gap: 10px !important;
+      margin-top: 6px;
+      justify-content: center;
+      align-content: center;
+    }
+
+    .plate{
+      width:44px !important;
+      height:44px !important;
+      border-radius:50%;
+      background:#000;
+      border:1px solid #555;
+      display:grid;
+      place-items:center;
+    }
+
+    .plate svg{width:26px;height:26px}
+    .plate .pasta{fill:#7a7a7a}
+    .plate.earned .pasta{fill:var(--gold)}
+
+    .reward{
+      margin-top:10px;
+      padding:10px 12px;
+      border-radius:10px;
+      background:#143513;
+      color:#d6ffd0;
+      border:1px solid #2e6f2b;
+      display:none;
+    }
+
+    .wallet{
+      display:none;
+      margin-top:12px;
+      font-weight:800;
+    }
+
+    .wallet a{
+      color:#fff;
+      text-decoration:none;
+      padding:10px 12px;
+      background:#1b8f3a;
+      border-radius:10px;
+    }
+  </style>
+</head>
+
+<body>
+  <header>
+    <img src="/assets/logo.png" alt="logo">
+  </header>
+
+  <div class="card" id="signupCard">
+    <p class="muted">🍝 PastaPass 10+1 — buy 10 pastas, get 1 free!</p>
+
+    <label>Name</label>
+    <input id="name" placeholder="Your name">
+
+    <label>Email</label>
+    <input id="email" placeholder="your@email.com">
+
+    <label>Phone</label>
+    <input id="phone" placeholder="+358 ...">
+
+    <label><input type="checkbox" id="consentMarketing"> I agree to receive PastaPass updates and offers.</label>
+    <label><input type="checkbox" id="consentLocation"> I agree to location-based reminders (opt-out anytime).</label>
+
+    <button id="joinBtn">Join PastaPass</button>
+    <div id="out" class="muted" style="margin-top:10px;"></div>
+  </div>
+
+  <div class="card" id="walletCard" style="display:none">
+    <div class="muted">Your PastaPass</div>
+    <div id="plates" class="plates" aria-live="polite"></div>
+    <div id="reward" class="reward"></div>
+    <div id="wallet" class="wallet">
+      <a id="applewallet" href="#" download>Add to Apple Wallet</a>
+    </div>
+  </div>
+
+  <script>
+    const pastaSVG = `
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path class="pasta" d="M4 12c0-3.3 3.1-6 6.9-6 2.1 0 4 .8 5.2 2 .3.3.3.8 0 1.1-.3.3-.8.3-1.1 0-1-1-2.5-1.6-4.1-1.6-3 0-5.4 1.9-5.4 4.3s2.4 4.3 5.4 4.3c1.6 0 3.1-.6 4.1-1.6.3-.3.8-.3 1.1 0 .3.3.3.8 0 1.1-1.2 1.2-3.1 2-5.2 2C7.1 18 4 15.3 4 12zM14 8c.4 0 .8.3.8.8S14.4 9.5 14 9.5s-.8-.3-.8-.8.3-.7.8-.7zm2.8 3.2c.4 0 .8.3.8.8s-.3.8-.8.8-.8-.3-.8-.8.4-.8.8-.8z"/>
+      </svg>`;
+
+    const signupCard = document.getElementById('signupCard');
+    const walletCard = document.getElementById('walletCard');
+    const platesEl = document.getElementById('plates');
+    const rewardEl = document.getElementById('reward');
+    const out = document.getElementById('out');
+    const joinBtn = document.getElementById('joinBtn');
+    const tokenFromQR = decodeURIComponent(location.hash.slice(1) || '');
+
+    function renderPlates(n){
+      const total=10;
+      platesEl.innerHTML='';
+      for(let i=0;i<total;i++){
+        const d=document.createElement('div');
+        d.className='plate'+(i<n?' earned':'');
+        d.innerHTML=pastaSVG;
+        platesEl.appendChild(d);
+      }
+      enforceGrid();
+    }
+
+    function enforceGrid(){
+      platesEl.style.display='grid';
+      platesEl.style.gridTemplateColumns='repeat(5,44px)';
+      platesEl.style.gridAutoRows='44px';
+      platesEl.style.justifyContent='center';
+      platesEl.style.alignContent='center';
+      platesEl.style.gap='10px';
+    }
+
+    function getIdentifier(){ return localStorage.getItem('pastapass_id') || ''; }
+    function setIdentifier(id){ localStorage.setItem('pastapass_id', id); }
+
+    async function apiSignup(payload){
+      const r = await fetch('/api/signup',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+      const j = await r.json();
+      if(!r.ok) throw new Error(j.error||'signup failed');
+      return j;
+    }
+
+    async function apiAddStamp(identifier, token){
+      const r = await fetch('/api/stamps/add',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({identifier, token})});
+      const j = await r.json();
+      if(!r.ok) throw new Error(j.error||'add stamp failed');
+      return j;
+    }
+
+    function showWallet(stamps, customerId, maybeReward){
+      signupCard.style.display='none';
+      walletCard.style.display='block';
+      renderPlates(stamps||0);
+      if(maybeReward){
+        rewardEl.style.display='block';
+        rewardEl.textContent="🎉 Reward unlocked! Code: "+maybeReward;
+      }else{
+        rewardEl.style.display='none';
+        rewardEl.textContent='';
+      }
+      const a=document.getElementById('applewallet');
+      a.href='/api/wallet/apple/'+customerId+'.pkpass';
+      document.getElementById('wallet').style.display='block';
+    }
+
+    (async function init(){
+      const stored=getIdentifier();
+      if(stored){
+        if(tokenFromQR){
+          try{
+            const j=await apiAddStamp(stored,tokenFromQR);
+            showWallet(j.stamps,j.customerId||stored,j.rewardCode);
+            out.textContent='Stamp added!';
+            return;
+          }catch(e){
+            out.textContent='Could not auto-stamp: '+e.message;
+            showWallet(0,stored,null);
+            return;
+          }
+        }else{
+          showWallet(0,stored,null);
+          return;
+        }
+      }
+      signupCard.style.display='block';
+      walletCard.style.display='none';
+    })();
+
+    joinBtn.addEventListener('click', async ()=>{
+      const name=document.getElementById('name').value.trim()||null;
+      const email=document.getElementById('email').value.trim()||null;
+      const phone=document.getElementById('phone').value.trim()||null;
+      const consentMarketing=document.getElementById('consentMarketing').checked;
+      const consentLocation=document.getElementById('consentLocation').checked;
+      const identifier=email||phone;
+      if(!identifier){ out.textContent='Please enter an email or phone.'; return; }
+      out.textContent='Creating your PastaPass…';
+      try{
+        const signupRes=await apiSignup({name,email,phone,consentMarketing,consentLocation});
+        const custId=(signupRes.customer&&signupRes.customer.id)||identifier;
+        setIdentifier(identifier);
+        let stamps=signupRes.wallet?.stamps||0;
+        let reward=null;
+        if(tokenFromQR){
+          try{
+            const addRes=await apiAddStamp(identifier,tokenFromQR);
+            stamps=addRes.stamps||stamps;
+            reward=addRes.rewardCode||null;
+            out.textContent='Welcome! Stamp added.';
+          }catch(e){
+            out.textContent='Signed up. Could not add stamp: '+e.message;
+          }
+        }else out.textContent='Welcome! You are signed up.';
+        showWallet(stamps,custId,reward);
+      }catch(e){
+        out.textContent='Error: '+e.message;
+      }
+    });
+  </script>
+</body>
+</html>

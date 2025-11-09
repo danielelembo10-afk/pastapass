@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>PastaPass — Staff</title>
+  <link rel="icon" href="/web/assets/logo.png">
+  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@600;800;900&display=swap" rel="stylesheet">
+  <style>
+    :root{ --flag-red:#d32f2f; --flag-white:#ffffff; --flag-green:#1b8f3a; --gold:#f1c40f }
+    *{ box-sizing:border-box }
+    html,body{ height:100% }
+    body{
+      margin:0; font-family:Montserrat,system-ui,-apple-system,Segoe UI,Roboto,Arial;
+      background: linear-gradient(90deg,var(--flag-green) 0 33.33%,var(--flag-white) 33.33% 66.66%,var(--flag-red) 66.66% 100%);
+      color:#111;
+    }
+    header{ padding:18px 20px; display:flex; justify-content:center; align-items:center; }
+    .logo{ width:min(90%,520px); max-width:520px; height:auto; display:block; filter: drop-shadow(0 8px 24px rgba(0,0,0,.25)); }
+    .page{ padding:22px; display:flex; flex-direction:column; align-items:center; gap:18px }
+    .grid{ display:grid; grid-template-columns:1fr; gap:18px; width:100%; max-width:920px }
+    @media(min-width:780px){ .grid{ grid-template-columns:1fr 1fr } }
+    .card{ background:#111; color:#eee; border:1px solid #ffffff22; border-radius:18px; padding:20px; box-shadow:0 10px 24px rgba(0,0,0,.35) }
+    .muted{ color:#bbb; font-size:13px }
+    .qrbox{ display:flex; flex-direction:column; align-items:center; gap:12px }
+    .qrimg{ background:#fff; border-radius:12px; width:240px; height:240px; object-fit:contain }
+    .row{ display:flex; gap:10px; align-items:center }
+    input{ width:320px; padding:12px; border-radius:10px; border:1px solid #444; background:#181818; color:#fff }
+    button{ padding:12px 16px; border:0; border-radius:12px; background:#fff; color:#000; font-weight:900; cursor:pointer }
+    .plates{ display:flex; flex-wrap:wrap; gap:8px; margin-top:6px }
+    .plate{ width:34px; height:34px; border-radius:50%; background:#000; border:1px solid #555; display:grid; place-items:center; box-shadow:inset 0 0 0 2px #2a2a2a }
+    .plate svg{ width:22px; height:22px }
+    .plate .pasta{ fill:#7a7a7a }      /* grey (empty) */
+    .plate.earned .pasta{ fill:var(--gold) } /* gold (stamped) */
+    .reward{ margin-top:8px; padding:10px 12px; border-radius:10px; background:#143513; color:#d6ffd0; border:1px solid #2e6f2b; display:none }
+  </style>
+</head>
+<body>
+  <header>
+    <img class="logo" src="/web/assets/logo.png" alt="Pasta Factory A Mare logo">
+  </header>
+
+  <div class="page">
+    <div class="grid">
+      <div class="card qrbox">
+        <div class="muted">Scan to add a stamp (QR auto-refreshes)</div>
+        <img id="qrimg" class="qrimg" alt="QR">
+        <div class="muted" id="expires"></div>
+      </div>
+
+      <div class="card" style="display:flex; flex-direction:column; gap:10px;">
+        <label class="muted">Manual stamp (email or phone)</label>
+        <div class="row">
+          <input id="identifier" placeholder="email or phone">
+          <button onclick="addStamp()">Add stamp</button>
+        </div>
+        <div id="out" class="muted"></div>
+        <div id="plates" class="plates" aria-live="polite"></div>
+        <div id="reward" class="reward"></div>
+      </div>
+    </div>
+
+    <div class="muted">Tip: open this page via your PC’s LAN IP so phones can scan.</div>
+  </div>
+
+  <script>
+    const pastaSVG = `
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path class="pasta" d="M4 12c0-3.3 3.1-6 6.9-6 2.1 0 4 .8 5.2 2 .3.3.3.8 0 1.1-.3.3-.8.3-1.1 0-1-1-2.5-1.6-4.1-1.6-3 0-5.4 1.9-5.4 4.3s2.4 4.3 5.4 4.3c1.6 0 3.1-.6 4.1-1.6.3-.3.8-.3 1.1 0 .3.3.3.8 0 1.1-1.2 1.2-3.1 2-5.2 2C7.1 18 4 15.3 4 12zM14 8c.4 0 .8.3.8.8S14.4 9.5 14 9.5s-.8-.3-.8-.8.3-.7.8-.7zm2.8 3.2c.4 0 .8.3.8.8s-.3.8-.8.8-.8-.3-.8-.8.4-.8.8-.8z"/>
+      </svg>`;
+
+    function renderPlates(stamps){
+      const total = 10, wrap = document.getElementById('plates'); wrap.innerHTML='';
+      for(let i=0;i<total;i++){
+        const d = document.createElement('div');
+        d.className = 'plate' + (i<stamps?' earned':''); d.innerHTML = pastaSVG; wrap.appendChild(d);
+      }
+    }
+
+    let currentToken=null, validFor=30;
+
+    async function refreshToken(){
+      try{
+        const r = await fetch('/api/staff/rotating-token');
+        const j = await r.json();
+        currentToken = j.token; validFor = j.validForSeconds || 30;
+        const origin = window.location.origin;
+        const payloadUrl = origin + '/web/scan.html#' + encodeURIComponent(currentToken);
+        document.getElementById('qrimg').src =
+          'https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=' + encodeURIComponent(payloadUrl);
+        document.getElementById('expires').textContent = "Rotates every ~" + validFor + "s";
+      }catch(e){
+        document.getElementById('expires').textContent = "Could not load QR.";
+      }
+    }
+
+    async function addStamp(){
+      const idf = document.getElementById('identifier').value.trim();
+      if(!idf){ document.getElementById('out').textContent = "Type an email or phone."; return; }
+      if(!currentToken){ await refreshToken(); }
+      const r = await fetch('/api/stamps/add', { method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ identifier:idf, token: currentToken }) });
+      const j = await r.json();
+      if(!r.ok){ document.getElementById('out').textContent = 'Error: ' + (j.error||'unknown'); return; }
+      document.getElementById('out').textContent = 'Stamp added.';
+      renderPlates(j.stamps||0);
+      const rw = document.getElementById('reward');
+      if(j.rewardCode){ rw.style.display='block'; rw.textContent="🎉 Reward unlocked! Code: "+j.rewardCode; }
+      else { rw.style.display='none'; rw.textContent=''; }
+    }
+
+    renderPlates(0);
+    refreshToken();
+    setInterval(refreshToken,15000);
+  </script>
+</body>
+</html>
