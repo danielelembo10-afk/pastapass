@@ -8,6 +8,7 @@
     "init-db": "node server/scripts/init_db.js"
   },
   "dependencies": {
+    "@libsql/client": "^0.10.0",
     "better-sqlite3": "^11.4.0",
     "body-parser": "^1.20.2",
     "cors": "^2.8.5",
