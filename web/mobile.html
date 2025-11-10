@@ -4,13 +4,15 @@
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
   <title>PastaPass — Mobile</title>
-<link rel="manifest" href="/manifest.json">
-<meta name="theme-color" content="#1b8f3a">
-<script>
-if ("serviceWorker" in navigator) {
-  navigator.serviceWorker.register("/service-worker.js");
-}
-</script>
+
+  <!-- PWA basics -->
+  <link rel="manifest" href="/manifest.json">
+  <meta name="theme-color" content="#1b8f3a">
+  <script>
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.register("/service-worker.js");
+    }
+  </script>
 
   <link rel="icon" href="/assets/logo.png">
   <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@600;800;900&display=swap" rel="stylesheet">
@@ -58,7 +60,7 @@ if ("serviceWorker" in navigator) {
     .wallet{display:none; margin-top:12px; font-weight:800}
     .wallet a{color:#fff; text-decoration:none; padding:10px 12px; background:#1b8f3a; border-radius:10px}
 
-    /* ======= Native-style toast banner ======= */
+    /* ======= Native-style toast banner (geofence) ======= */
     .toast{
       position: fixed;
       top: -120px; left: 50%; transform: translateX(-50%);
@@ -77,14 +79,52 @@ if ("serviceWorker" in navigator) {
     .toast .close{
       margin-left: auto; border:0; background:transparent; color:#aaa; font-size:18px; cursor:pointer;
     }
+
+    /* ======= PWA install banner ======= */
+    .install-banner{
+      position: fixed; bottom: -180px; left: 50%; transform: translateX(-50%);
+      width: min(92vw, 560px);
+      background:#111; color:#f3f3f3; border:1px solid #ffffff22; border-radius:16px 16px 8px 8px;
+      box-shadow: 0 -10px 30px rgba(0,0,0,.4);
+      padding:12px 14px; z-index:9998;
+      transition: bottom .35s ease;
+    }
+    .install-banner.show{ bottom: 10px; }
+    .install-row{ display:flex; align-items:center; gap:12px; }
+    .install-title{ font-weight:900; }
+    .install-sub{ color:#bbb; font-size:13px; margin-top:2px }
+    .install-actions{ margin-left:auto; display:flex; gap:8px }
+    .btn{
+      border:0; border-radius:10px; padding:8px 12px; font-weight:800; cursor:pointer;
+    }
+    .btn-primary{ background:#1b8f3a; color:#fff }
+    .btn-ghost{ background:#222; color:#ddd }
   </style>
 </head>
 <body>
-  <!-- Toast banner -->
+  <!-- Geofence Toast -->
   <div id="toast" class="toast" role="status" aria-live="polite" aria-atomic="true">
     <div class="icon">📍</div>
     <div class="content" id="toastMsg">Hey! You’re near Pasta Factory A Mare — only 3 pastas left before your free one.</div>
     <button class="close" aria-label="Close" onclick="hideToast()">×</button>
+  </div>
+
+  <!-- PWA Install Banner -->
+  <div id="installBanner" class="install-banner" role="dialog" aria-live="polite" aria-atomic="true">
+    <div class="install-row">
+      <div>
+        <div class="install-title">Add PastaPass to your Home Screen</div>
+        <div class="install-sub" id="installSub">Get quick access + nearby reminders.</div>
+      </div>
+      <div class="install-actions">
+        <button id="installBtn" class="btn btn-primary" style="display:none">Install</button>
+        <button id="howBtn" class="btn btn-ghost" style="display:none">How?</button>
+        <button id="closeInstall" class="btn btn-ghost">×</button>
+      </div>
+    </div>
+    <div id="iosSteps" class="install-sub" style="display:none; margin-top:8px;">
+      On iPhone: tap <b>Share</b> → <b>Add to Home Screen</b>.
+    </div>
   </div>
 
   <header><img src="/assets/logo.png" alt="logo"></header>
@@ -153,8 +193,8 @@ if ("serviceWorker" in navigator) {
     }
 
     // ======= Nearby toast logic (no Apple Dev needed) =======
-    const REST_LAT = 36.533333;   // TODO: replace with your exact latitude
-    const REST_LON = -4.626667;   // TODO: replace with your exact longitude
+    const REST_LAT = 36.533333;   // Pasta Factory A Mare (decimal)
+    const REST_LON = -4.626667;
     const RADIUS_M = 300;        // meters
     const CHECK_INTERVAL_MS = 60000; // every 1 minute
     const TOAST_COOLDOWN_MS = 3 * 60 * 60 * 1000; // show at most once every 3h
@@ -215,14 +255,11 @@ if ("serviceWorker" in navigator) {
           showToast(text);
           markToastShown();
         }
-      }, err => {
-        // user denied or error; do nothing
-      }, { enableHighAccuracy:false, timeout:8000, maximumAge:60000 });
+      }, err => {}, { enableHighAccuracy:false, timeout:8000, maximumAge:60000 });
     }
 
     function startGeoNotifications(){
       if(!navigator.geolocation) return;
-      // start polling after permission is granted or promptable
       if(navigator.permissions && navigator.permissions.query){
         navigator.permissions.query({name:'geolocation'}).then(status=>{
           if(status.state==='granted' || status.state==='prompt'){
@@ -231,11 +268,88 @@ if ("serviceWorker" in navigator) {
           }
         });
       }else{
-        // older iOS: just try
         setInterval(checkNearby, CHECK_INTERVAL_MS);
         checkNearby();
       }
     }
+
+    // ======= PWA Install Banner (Android + iOS) =======
+    const INSTALL_KEY = 'pf_install_dismissed_at';
+    const INSTALL_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+    let deferredPrompt = null;
+
+    function isStandalone(){
+      return window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+    }
+    function isiOS(){
+      return /iphone|ipad|ipod/i.test(navigator.userAgent);
+    }
+    function isAndroid(){
+      return /android/i.test(navigator.userAgent);
+    }
+    function canShowInstall(){
+      const last = parseInt(localStorage.getItem(INSTALL_KEY)||'0',10);
+      return !isStandalone() && (Date.now() - last) > INSTALL_COOLDOWN_MS;
+    }
+    function markInstallDismissed(){
+      localStorage.setItem(INSTALL_KEY, String(Date.now()));
+    }
+
+    function showInstallBannerForIOS(){
+      const banner = document.getElementById('installBanner');
+      const btn = document.getElementById('installBtn');
+      const how = document.getElementById('howBtn');
+      const sub = document.getElementById('installSub');
+      const steps = document.getElementById('iosSteps');
+      btn.style.display = 'none';
+      how.style.display = 'inline-block';
+      steps.style.display = 'none';
+      sub.textContent = "On iPhone, install from the Share menu.";
+      banner.classList.add('show');
+      how.onclick = () => { steps.style.display = (steps.style.display==='none'?'block':'none'); };
+    }
+
+    function showInstallBannerForAndroid(){
+      const banner = document.getElementById('installBanner');
+      const btn = document.getElementById('installBtn');
+      const how = document.getElementById('howBtn');
+      const steps = document.getElementById('iosSteps');
+      btn.style.display = 'inline-block';
+      how.style.display = 'none';
+      steps.style.display = 'none';
+      banner.classList.add('show');
+      btn.onclick = async () => {
+        if(!deferredPrompt) return;
+        deferredPrompt.prompt();
+        const choice = await deferredPrompt.userChoice;
+        if(choice.outcome === 'accepted'){
+          banner.classList.remove('show');
+          deferredPrompt = null;
+        }
+      };
+    }
+
+    window.addEventListener('beforeinstallprompt', (e) => {
+      // Android Chrome fires this when installable
+      e.preventDefault();
+      deferredPrompt = e;
+      if(canShowInstall() && isAndroid()){
+        showInstallBannerForAndroid();
+      }
+    });
+
+    function maybeShowInstallBanner(){
+      if(!canShowInstall()) return;
+      if(isiOS()){
+        showInstallBannerForIOS();
+      }
+      // On Android we wait for beforeinstallprompt to ensure install works
+    }
+
+    document.getElementById('closeInstall').addEventListener('click', () => {
+      document.getElementById('installBanner').classList.remove('show');
+      markInstallDismissed();
+    });
 
     // ======= INIT =======
     (async function init(){
@@ -265,8 +379,10 @@ if ("serviceWorker" in navigator) {
         signupCard.style.display='block';
         walletCard.style.display='none';
       }
-      // start geofence check
+
+      // start geofence check + maybe show install banner
       startGeoNotifications();
+      maybeShowInstallBanner();
     })();
 
     // SIGNUP then (if token present) auto-stamp
