@@ -1,0 +1,17 @@
+{
+  "name": "PastaPass",
+  "short_name": "PastaPass",
+  "start_url": "/mobile.html",
+  "display": "standalone",
+  "background_color": "#1b8f3a",
+  "theme_color": "#1b8f3a",
+  "description": "Buy 10 pastas, get 1 free at Pasta Factory A Mare.",
+  "icons": [
+    {
+      "src": "/assets/logo.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
