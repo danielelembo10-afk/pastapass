@@ -182,5 +182,59 @@
       }
     });
   </script>
+<script>
+// ---- Pasta Factory A Mare location notification ----
+const REST_LAT = 36.53912;   // replace with your exact latitude
+const REST_LON = -4.62543;   // replace with your exact longitude
+const RADIUS_M = 300;        // meters
+const CHECK_INTERVAL_MS = 60000; // check every 1 min
+
+function getDistanceMeters(lat1, lon1, lat2, lon2){
+  const R = 6371000;
+  const φ1 = lat1 * Math.PI/180, φ2 = lat2 * Math.PI/180;
+  const Δφ = (lat2-lat1)*Math.PI/180, Δλ = (lon2-lon1)*Math.PI/180;
+  const a = Math.sin(Δφ/2)**2 + Math.cos(φ1)*Math.cos(φ2)*Math.sin(Δλ/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+
+async function getWalletData(){
+  try{
+    const id = localStorage.getItem('pastapass_id');
+    if(!id) return null;
+    const r = await fetch(`${API}/api/signup`,{method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({email:id})});
+    const j = await r.json();
+    return j.wallet?.stamps || 0;
+  }catch{ return 0; }
+}
+
+async function checkNearby(){
+  if(!navigator.geolocation) return;
+  navigator.geolocation.getCurrentPosition(async pos=>{
+    const dist = getDistanceMeters(pos.coords.latitude,pos.coords.longitude,REST_LAT,REST_LON);
+    if(dist < RADIUS_M){
+      const stamps = await getWalletData();
+      const left = 10 - (stamps % 10);
+      alert(`🍝 Hey! You're near Pasta Factory A Mare — only ${left} pastas left before your free one!`);
+    }
+  });
+}
+
+function startGeoNotifications(){
+  if(!navigator.geolocation){
+    console.log("Geolocation not supported");
+    return;
+  }
+  navigator.permissions?.query({name:'geolocation'}).then(status=>{
+    if(status.state==='granted'||status.state==='prompt'){
+      setInterval(checkNearby, CHECK_INTERVAL_MS);
+      checkNearby();
+    }
+  });
+}
+
+startGeoNotifications();
+</script>
 </body>
 </html>
