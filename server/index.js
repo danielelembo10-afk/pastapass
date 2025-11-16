@@ -10,7 +10,6 @@ import Database from 'better-sqlite3';          // local fallback
 import { createClient } from '@libsql/client';  // Turso (libSQL)
 
 import { customAlphabet } from 'nanoid';
-import crypto from 'crypto';
 import admin from 'firebase-admin';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -25,17 +24,23 @@ app.use(express.static(path.join(__dirname, '..', 'web')));
 // ---------- DB LAYER (Turso if env present, else local SQLite) ----------
 const useTurso = !!(process.env.TURSO_DATABASE_URL && process.env.TURSO_AUTH_TOKEN);
 
-let tdb = null;            // libsql client
-let sdb = null;            // better-sqlite3 instance
+let tdb = null; // libsql client
+let sdb = null; // better-sqlite3 instance
 
-// unified helpers
+// --- helper to clean parameters ---
+function _sanitize(params = []) {
+  return params.map(v => (v === undefined ? null : v));
+}
+
 const db = {
   async exec(sql, params = []) {
+    params = _sanitize(params);
     if (useTurso) return tdb.execute({ sql, args: params });
     const stmt = sdb.prepare(sql);
     return stmt.run(...params);
   },
   async get(sql, params = []) {
+    params = _sanitize(params);
     if (useTurso) {
       const r = await tdb.execute({ sql, args: params });
       return r.rows[0] || undefined;
@@ -44,6 +49,7 @@ const db = {
     return stmt.get(...params);
   },
   async all(sql, params = []) {
+    params = _sanitize(params);
     if (useTurso) {
       const r = await tdb.execute({ sql, args: params });
       return r.rows || [];
@@ -53,6 +59,7 @@ const db = {
   }
 };
 
+// ---------- DB INITIALIZATION ----------
 (async () => {
   try {
     if (useTurso) {
@@ -63,10 +70,10 @@ const db = {
       console.log('✅ Turso (libSQL) client initialized');
     } else {
       sdb = new Database('pasta.db');
-      console.log('✅ Local SQLite (better-sqlite3) initialized → pasta.db');
+      console.log('✅ Local SQLite initialized → pasta.db');
     }
 
-    // SCHEMA
+    // schema
     await db.exec(`
       CREATE TABLE IF NOT EXISTS customers (
         id TEXT PRIMARY KEY,
@@ -106,7 +113,7 @@ const db = {
   }
 })();
 
-// ---------- Firebase Admin (push) ----------
+// ---------- FIREBASE ADMIN ----------
 if (!admin.apps.length) {
   const projectId  = process.env.FIREBASE_PROJECT_ID;
   const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
@@ -120,14 +127,17 @@ if (!admin.apps.length) {
   }
 }
 
+// ---------- HELPERS ----------
 const nanoid = customAlphabet('123456789ABCDEFGHJKLMNPQRSTUVWXYZ', 8);
 
-// ---------- HELPERS ----------
 async function getOrCreateCustomer({ email, phone, name }) {
   const identifier = email || phone;
   if (!identifier) throw new Error('Email or phone required');
 
-  const existing = await db.get('SELECT * FROM customers WHERE email=? OR phone=?', [email, phone]);
+  const existing = await db.get(
+    'SELECT * FROM customers WHERE email=? OR phone=?',
+    [email || null, phone || null]
+  );
   if (existing) return existing;
 
   const id = nanoid();
@@ -136,24 +146,21 @@ async function getOrCreateCustomer({ email, phone, name }) {
   return { id, name, email, phone };
 }
 
-// --- stamps helpers (new logic) ---
+// --- stamps logic (10th reward handling) ---
 async function getStamps(customer_id) {
   const row = await db.get('SELECT count FROM stamps WHERE customer_id=?', [customer_id]);
-  return row ? Math.max(0, Math.min(10, Number(row.count))) : 0; // clamp 0..10
+  return row ? Math.max(0, Math.min(10, Number(row.count))) : 0;
 }
 
 async function setStamps(customer_id, count) {
-  await db.exec(
-    'UPDATE stamps SET count=?, updated_at=strftime("%s","now") WHERE customer_id=?',
-    [count, customer_id]
-  );
+  await db.exec('UPDATE stamps SET count=?, updated_at=strftime("%s","now") WHERE customer_id=?', [count, customer_id]);
 }
 
 /**
- * State machine:
- * - 0..8  → add 1
- * - 9     → set to 10 and return {ready:true} (do NOT reset)
- * - 10    → consume reward (this scan), reset to 0 and return {redeemed:true}
+ * Rules:
+ * - 0..8 → add 1
+ * - 9 → set to 10 (ready for reward)
+ * - 10 → redeem (reset to 0)
  */
 async function addStampSmart(customer_id) {
   const current = await getStamps(customer_id);
@@ -169,7 +176,7 @@ async function addStampSmart(customer_id) {
     return { stamps: 10, ready: true, redeemed: false };
   }
 
-  // current === 10 → this scan redeems and resets to 0
+  // 10 → redeem and reset
   await setStamps(customer_id, 0);
   return { stamps: 0, ready: false, redeemed: true };
 }
@@ -194,7 +201,7 @@ app.post('/api/stamps/add', async (req, res) => {
 
     const customer = await db.get(
       'SELECT * FROM customers WHERE email=? OR phone=?',
-      [identifier, identifier]
+      [identifier || null, identifier || null]
     );
     if (!customer) return res.status(404).json({ error: 'customer not found' });
 
@@ -206,12 +213,11 @@ app.post('/api/stamps/add', async (req, res) => {
   }
 });
 
-// Push: save token
+// Push: save FCM token
 app.post('/api/push/register', async (req, res) => {
   try {
     const { identifier, token, platform } = req.body || {};
     if (!identifier || !token) return res.status(400).json({ error: 'identifier and token required' });
-    // upsert by token
     await db.exec(`
       INSERT INTO device_tokens (identifier, token, platform, created_at, updated_at)
       VALUES (?, ?, ?, strftime('%s','now'), strftime('%s','now'))
@@ -227,7 +233,7 @@ app.post('/api/push/register', async (req, res) => {
   }
 });
 
-// Push: manual test
+// Push: test
 app.post('/api/push/test', async (req, res) => {
   try {
     if (!admin.apps.length) return res.status(503).json({ error: 'push not configured' });
