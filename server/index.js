@@ -1,310 +1,263 @@
-<!doctype html>
-<html lang="en" data-vapid="BPS3XpWDobMXOTVRDw_qBGnI8ALo5dXS-dlBJS9efCrqK9qKH5HLyBezA0N_4iqkO3ds2f8DJU_JW4P8p6pmB64">
-<head>
-  <meta charset="utf-8"/>
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
-  <title>PastaPass — Mobile</title>
+import path from 'path';
+import { fileURLToPath } from 'url';
+import 'dotenv/config';
+import express from 'express';
+import bodyParser from 'body-parser';
+import cors from 'cors';
 
-  <!-- PWA basics -->
-  <link rel="manifest" href="/manifest.json">
-  <meta name="theme-color" content="#1b8f3a">
-  <script>
-    if ("serviceWorker" in navigator) {
-      navigator.serviceWorker.register("/service-worker.js");
+// DB drivers
+import Database from 'better-sqlite3';          // local fallback
+import { createClient } from '@libsql/client';  // Turso (libSQL)
+
+import { customAlphabet } from 'nanoid';
+import crypto from 'crypto';
+import admin from 'firebase-admin';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+const app = express();
+app.use(cors());
+app.use(bodyParser.json());
+app.use('/assets', express.static(path.join(__dirname, '..', 'web', 'assets')));
+app.use(express.static(path.join(__dirname, '..', 'web')));
+
+// ---------- DB LAYER (Turso if env present, else local SQLite) ----------
+const useTurso = !!(process.env.TURSO_DATABASE_URL && process.env.TURSO_AUTH_TOKEN);
+
+let tdb = null;            // libsql client
+let sdb = null;            // better-sqlite3 instance
+
+// unified helpers
+const db = {
+  async exec(sql, params = []) {
+    if (useTurso) return tdb.execute({ sql, args: params });
+    const stmt = sdb.prepare(sql);
+    return stmt.run(...params);
+  },
+  async get(sql, params = []) {
+    if (useTurso) {
+      const r = await tdb.execute({ sql, args: params });
+      return r.rows[0] || undefined;
     }
-  </script>
-
-  <!-- Firebase Web SDK (modular) + push registration -->
-  <script type="module">
-    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.1/firebase-app.js";
-    import { getMessaging, getToken, onMessage } from "https://www.gstatic.com/firebasejs/10.13.1/firebase-messaging.js";
-
-    const firebaseConfig = {
-      apiKey: "AIzaSyAEXhG7UrzHhdVDl6ydsjurZPOmQ2hl2bE",
-      authDomain: "pastapass-4127a.firebaseapp.com",
-      projectId: "pastapass-4127a",
-      storageBucket: "pastapass-4127a.firebasestorage.app",
-      messagingSenderId: "93101930941",
-      appId: "1:93101930941:web:fb85697b445e691c073ad4",
-      measurementId: "G-YZ7FP3RTV4"
-    };
-
-    const app = initializeApp(firebaseConfig);
-    const messaging = getMessaging(app);
-
-    async function ensureFCMRegistered() {
-      try {
-        const swReg = await navigator.serviceWorker.register('/firebase-messaging-sw.js');
-        if (!('Notification' in window)) return;
-        const perm = await Notification.requestPermission();
-        if (perm !== 'granted') return;
-
-        const publicKey = document.documentElement.dataset.vapid;
-        const token = await getToken(messaging, { vapidKey: publicKey, serviceWorkerRegistration: swReg });
-        if (!token) return;
-
-        const identifier = localStorage.getItem('pastapass_id') || '';
-        if (!identifier) return;
-
-        await fetch('/api/push/register', {
-          method:'POST',
-          headers:{'Content-Type':'application/json'},
-          body: JSON.stringify({
-            identifier,
-            token,
-            platform: /iphone|ipad|ipod/i.test(navigator.userAgent) ? 'ios' :
-                      /android/i.test(navigator.userAgent) ? 'android' : 'web'
-          })
-        });
-
-        onMessage(messaging, payload => {
-          const n = payload?.notification;
-          if (n?.title) alert(`${n.title}\n${n.body || ''}`);
-        });
-      } catch (e) {
-        console.log('FCM register error', e);
-      }
+    const stmt = sdb.prepare(sql);
+    return stmt.get(...params);
+  },
+  async all(sql, params = []) {
+    if (useTurso) {
+      const r = await tdb.execute({ sql, args: params });
+      return r.rows || [];
     }
-    window._ensureFCMRegistered = ensureFCMRegistered;
-  </script>
+    const stmt = sdb.prepare(sql);
+    return stmt.all(...params);
+  }
+};
 
-  <link rel="icon" href="/assets/logo.png">
-  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@600;800;900&display=swap" rel="stylesheet">
-  <style>
-    :root{ --green:#1b8f3a; --white:#ffffff; --red:#d32f2f; --gold:#f1c40f }
-    *{box-sizing:border-box;margin:0;padding:0}
-    body{
-      font-family:Montserrat,system-ui,-apple-system,Segoe UI,Roboto,Arial;
-      background:linear-gradient(90deg,var(--green) 0 33.33%, var(--white) 33.33% 66.66%, var(--red) 66.66% 100%);
-      min-height:100vh; display:flex; flex-direction:column; align-items:center;
-    }
-    header{padding:16px 8px; text-align:center}
-    header img{width:min(90vw,540px); height:auto; display:inline-block; background:none; filter:none}
-    .card{
-      width:100%; max-width:560px; background:#111; color:#eee;
-      border:1px solid #ffffff22; border-radius:18px; padding:16px; margin:12px;
-    }
-    label{display:block; margin:10px 0 6px; font-weight:800}
-    input{width:100%; padding:12px; border-radius:10px; border:1px solid #444; background:#181818; color:#fff}
-    button{margin-top:12px; padding:12px 16px; border:0; border-radius:12px; background:#fff; color:#000; font-weight:900; width:100%}
-    .muted{color:#bbb; font-size:13px}
-
-    .plates{
-      display:grid !important;
-      grid-template-columns:repeat(5,44px)!important;
-      grid-auto-rows:44px!important;
-      gap:10px!important;
-      margin-top:6px;
-      justify-content:center;
-      align-content:center;
-    }
-    .plate{
-      width:44px; height:44px;
-      border-radius:50%; background:#000; border:1px solid #555;
-      display:grid; place-items:center;
-    }
-    .plate svg{width:26px;height:26px}
-    .plate .pasta{fill:#7a7a7a}
-    .plate.earned .pasta{fill:var(--gold)}
-
-    .toast{
-      position: fixed;
-      top: -120px; left: 50%; transform: translateX(-50%);
-      width: min(92vw, 560px);
-      background: #111; color: #f3f3f3;
-      border: 1px solid #ffffff22; border-radius: 14px;
-      padding: 12px 16px; z-index: 9999;
-      box-shadow: 0 10px 30px rgba(0,0,0,.5);
-      display: flex; align-items: start; gap: 10px;
-      transition: top .35s ease;
-    }
-    .toast.show{ top: 14px; }
-    .toast .icon{ font-size: 22px; line-height: 1; margin-top: 2px; }
-    .toast .content{ font-size: 14px; }
-    .toast .close{ margin-left: auto; border:0; background:transparent; color:#aaa; font-size:18px; cursor:pointer; }
-  </style>
-</head>
-<body>
-  <!-- Geofence Toast -->
-  <div id="toast" class="toast" role="status" aria-live="polite" aria-atomic="true" style="display:none"></div>
-
-  <header><img src="/assets/logo.png" alt="logo"></header>
-
-  <div class="card" id="signupCard">
-    <p class="muted">🍝 PastaPass 10+1 — buy 10 pastas, get 1 free!</p>
-    <label>Name</label><input id="name" placeholder="Your name">
-    <label>Email</label><input id="email" placeholder="your@email.com">
-    <label>Phone</label><input id="phone" placeholder="+358 ...">
-    <button id="joinBtn">Join PastaPass</button>
-    <div id="out" class="muted" style="margin-top:10px;"></div>
-  </div>
-
-  <div class="card" id="walletCard" style="display:none">
-    <div class="muted">Your PastaPass</div>
-    <div id="plates" class="plates" aria-live="polite"></div>
-    <div id="reward" class="muted" style="margin-top:8px;"></div>
-
-    <!-- One-button “Add to Home Screen” -->
-    <div class="a2hs" style="margin-top:12px;">
-      <button id="a2hsBtn" style="width:100%;padding:12px 16px;border:0;border-radius:12px;background:#1b8f3a;color:#fff;font-weight:900;">
-        Add to Home Screen
-      </button>
-    </div>
-  </div>
-
-  <script>
-    // ===== Identifier stored in localStorage + cookie to avoid “forgetting” =====
-    function setCookie(name, value, days = 365) {
-      const d = new Date(); d.setTime(d.getTime() + days*24*60*60*1000);
-      document.cookie = `${name}=${encodeURIComponent(value)};expires=${d.toUTCString()};path=/;SameSite=Lax`;
-    }
-    function getCookie(name) {
-      const m = document.cookie.match(new RegExp('(?:^|; )' + name.replace(/([.$?*|{}()[\\]\\/+^])/g,'\\$1') + '=([^;]*)'));
-      return m ? decodeURIComponent(m[1]) : '';
-    }
-    function getIdentifier(){ return localStorage.getItem('pastapass_id') || getCookie('pastapass_id') || ''; }
-    function setIdentifier(id){ if(!id) return; localStorage.setItem('pastapass_id', id); setCookie('pastapass_id', id); }
-
-    // API base
-    const API = ''; // same origin; Render serves API and web together
-
-    // SVG icon for plates
-    const pastaSVG = `<svg viewBox="0 0 24 24"><path class="pasta" d="M4 12c0-3.3 3.1-6 6.9-6 2.1 0 4 .8 5.2 2 .3.3.3.8 0 1.1-.3.3-.8.3-1.1 0-1-1-2.5-1.6-4.1-1.6-3 0-5.4 1.9-5.4 4.3s2.4 4.3 5.4 4.3c1.6 0 3.1-.6 4.1-1.6.3-.3.8-.3 1.1 0 .3.3.3.8 0 1.1-1.2 1.2-3.1 2-5.2 2C7.1 18 4 15.3 4 12zM14 8c.4 0 .8.3.8.8S14.4 9.5 14 9.5s-.8-.3-.8-.8.3-.7.8-.7zm2.8 3.2c.4 0 .8.3.8.8s-.3.8-.8.8-.8-.3-.8-.8.4-.8.8-.8z"/></svg>`;
-
-    // DOM refs
-    const signupCard=document.getElementById('signupCard');
-    const walletCard=document.getElementById('walletCard');
-    const platesEl=document.getElementById('plates');
-    const out=document.getElementById('out');
-    const rewardEl=document.getElementById('reward');
-    const joinBtn=document.getElementById('joinBtn');
-    const toast=document.getElementById('toast');
-    const tokenFromQR=decodeURIComponent(location.hash.slice(1)||'');
-
-    function renderPlates(n){
-      platesEl.innerHTML='';
-      for(let i=0;i<10;i++){
-        const d=document.createElement('div');
-        d.className='plate'+(i<n?' earned':'');
-        d.innerHTML=pastaSVG;
-        platesEl.appendChild(d);
-      }
-    }
-    function stripHashOnce(){ const clean = location.origin + location.pathname + location.search; history.replaceState(null, "", clean); }
-
-    async function apiSignup(payload){
-      const r=await fetch(`${API}/api/signup`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
-      const j=await r.json(); if(!r.ok) throw new Error(j.error||'signup failed'); return j;
-    }
-    async function apiAddStamp(identifier){
-      const r=await fetch(`${API}/api/stamps/add`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({identifier})});
-      const j=await r.json(); if(!r.ok) throw new Error(j.error||'add stamp failed'); return j;
+(async () => {
+  try {
+    if (useTurso) {
+      tdb = createClient({
+        url: process.env.TURSO_DATABASE_URL,
+        authToken: process.env.TURSO_AUTH_TOKEN
+      });
+      console.log('✅ Turso (libSQL) client initialized');
+    } else {
+      sdb = new Database('pasta.db');
+      console.log('✅ Local SQLite (better-sqlite3) initialized → pasta.db');
     }
 
-    function showWallet(stamps=0){
-      signupCard.style.display='none';
-      walletCard.style.display='block';
-      renderPlates(stamps);
-    }
+    // SCHEMA
+    await db.exec(`
+      CREATE TABLE IF NOT EXISTS customers (
+        id TEXT PRIMARY KEY,
+        name TEXT,
+        email TEXT,
+        phone TEXT,
+        created_at INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+        updated_at INTEGER NOT NULL DEFAULT (strftime('%s','now'))
+      )
+    `);
 
-    // A2HS prompt (Android) + simple instruction for iOS
-    let deferredPrompt=null;
-    const isStandalone = () => window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
-    window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); deferredPrompt = e; });
-    document.getElementById('a2hsBtn')?.addEventListener('click', async () => {
-      if (isStandalone()) return;
-      if (deferredPrompt) { deferredPrompt.prompt(); await deferredPrompt.userChoice; deferredPrompt = null; }
-      else alert('On iPhone: Share → Add to Home Screen');
+    await db.exec(`
+      CREATE TABLE IF NOT EXISTS stamps (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        customer_id TEXT NOT NULL,
+        count INTEGER DEFAULT 0,
+        updated_at INTEGER NOT NULL DEFAULT (strftime('%s','now'))
+      )
+    `);
+
+    await db.exec(`
+      CREATE TABLE IF NOT EXISTS device_tokens (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        identifier TEXT NOT NULL,
+        token TEXT NOT NULL UNIQUE,
+        platform TEXT,
+        created_at INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+        updated_at INTEGER NOT NULL DEFAULT (strftime('%s','now'))
+      )
+    `);
+
+    await db.exec(`CREATE INDEX IF NOT EXISTS idx_device_tokens_identifier ON device_tokens(identifier)`);
+
+  } catch (e) {
+    console.error('DB init error:', e);
+    process.exit(1);
+  }
+})();
+
+// ---------- Firebase Admin (push) ----------
+if (!admin.apps.length) {
+  const projectId  = process.env.FIREBASE_PROJECT_ID;
+  const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
+  const privateKey  = (process.env.FIREBASE_PRIVATE_KEY || '').replace(/\\n/g, '\n');
+
+  if (projectId && clientEmail && privateKey) {
+    admin.initializeApp({ credential: admin.credential.cert({ projectId, clientEmail, privateKey }) });
+    console.log('✅ Firebase Admin initialized');
+  } else {
+    console.warn('⚠️ Firebase Admin env missing; push disabled');
+  }
+}
+
+const nanoid = customAlphabet('123456789ABCDEFGHJKLMNPQRSTUVWXYZ', 8);
+
+// ---------- HELPERS ----------
+async function getOrCreateCustomer({ email, phone, name }) {
+  const identifier = email || phone;
+  if (!identifier) throw new Error('Email or phone required');
+
+  const existing = await db.get('SELECT * FROM customers WHERE email=? OR phone=?', [email, phone]);
+  if (existing) return existing;
+
+  const id = nanoid();
+  await db.exec('INSERT INTO customers (id, name, email, phone) VALUES (?,?,?,?)', [id, name, email, phone]);
+  await db.exec('INSERT INTO stamps (customer_id, count) VALUES (?,0)', [id]);
+  return { id, name, email, phone };
+}
+
+// --- stamps helpers (new logic) ---
+async function getStamps(customer_id) {
+  const row = await db.get('SELECT count FROM stamps WHERE customer_id=?', [customer_id]);
+  return row ? Math.max(0, Math.min(10, Number(row.count))) : 0; // clamp 0..10
+}
+
+async function setStamps(customer_id, count) {
+  await db.exec(
+    'UPDATE stamps SET count=?, updated_at=strftime("%s","now") WHERE customer_id=?',
+    [count, customer_id]
+  );
+}
+
+/**
+ * State machine:
+ * - 0..8  → add 1
+ * - 9     → set to 10 and return {ready:true} (do NOT reset)
+ * - 10    → consume reward (this scan), reset to 0 and return {redeemed:true}
+ */
+async function addStampSmart(customer_id) {
+  const current = await getStamps(customer_id);
+
+  if (current <= 8) {
+    const next = current + 1;
+    await setStamps(customer_id, next);
+    return { stamps: next, ready: false, redeemed: false };
+  }
+
+  if (current === 9) {
+    await setStamps(customer_id, 10);
+    return { stamps: 10, ready: true, redeemed: false };
+  }
+
+  // current === 10 → this scan redeems and resets to 0
+  await setStamps(customer_id, 0);
+  return { stamps: 0, ready: false, redeemed: true };
+}
+
+// ---------- ROUTES ----------
+app.post('/api/signup', async (req, res) => {
+  try {
+    const { name, email, phone } = req.body || {};
+    const customer = await getOrCreateCustomer({ name, email, phone });
+    const stamps = await getStamps(customer.id);
+    res.json({ customer, wallet: { stamps } });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/stamps/add', async (req, res) => {
+  try {
+    const { identifier } = req.body || {};
+    if (!identifier) return res.status(400).json({ error: 'identifier required' });
+
+    const customer = await db.get(
+      'SELECT * FROM customers WHERE email=? OR phone=?',
+      [identifier, identifier]
+    );
+    if (!customer) return res.status(404).json({ error: 'customer not found' });
+
+    const result = await addStampSmart(customer.id);
+    res.json({ ...result, customerId: customer.id });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Push: save token
+app.post('/api/push/register', async (req, res) => {
+  try {
+    const { identifier, token, platform } = req.body || {};
+    if (!identifier || !token) return res.status(400).json({ error: 'identifier and token required' });
+    // upsert by token
+    await db.exec(`
+      INSERT INTO device_tokens (identifier, token, platform, created_at, updated_at)
+      VALUES (?, ?, ?, strftime('%s','now'), strftime('%s','now'))
+      ON CONFLICT(token) DO UPDATE SET
+        identifier=excluded.identifier,
+        platform=excluded.platform,
+        updated_at=strftime('%s','now')
+    `, [identifier, token, platform || null]);
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('push/register error', e);
+    res.status(500).json({ error: 'failed to register token' });
+  }
+});
+
+// Push: manual test
+app.post('/api/push/test', async (req, res) => {
+  try {
+    if (!admin.apps.length) return res.status(503).json({ error: 'push not configured' });
+    const { identifier, title, body } = req.body || {};
+    if (!identifier) return res.status(400).json({ error: 'identifier required' });
+
+    const rows = await db.all(`SELECT token FROM device_tokens WHERE identifier=?`, [identifier]);
+    if (!rows.length) return res.status(404).json({ error: 'no tokens for identifier' });
+
+    const response = await admin.messaging().sendMulticast({
+      notification: { title: title || 'PastaPass', body: body || 'Test push 🚀' },
+      tokens: rows.map(r => r.token),
     });
+    res.json({ sent: response.successCount, failed: response.failureCount });
+  } catch (e) {
+    console.error('push/test error', e);
+    res.status(500).json({ error: 'failed to send test push' });
+  }
+});
 
-    // ===== INIT =====
-    (async function init(){
-      const stored=getIdentifier();
-      if(stored){
-        // if scanning via QR (we use #token in older flows), just add a stamp for this identifier
-        if(tokenFromQR){
-          try{
-            const j=await apiAddStamp(stored);
-            showWallet(j.stamps||0);
+// static
+app.get('/', (_, res) => res.sendFile(path.join(__dirname, '..', 'web', 'mobile.html')));
 
-            if (j.redeemed) {
-              out.textContent = '✅ Free pasta redeemed! Your card has been reset.';
-              rewardEl.textContent = '';
-            } else if (j.ready) {
-              out.textContent = '🎉 Congratulations! You have a FREE pasta waiting. Show this to staff and scan once more to redeem.';
-              rewardEl.textContent = '🎉 Free pasta available';
-            } else {
-              out.textContent = 'Stamp added!';
-              rewardEl.textContent = '';
-            }
-            stripHashOnce();
-          }catch(e){
-            out.textContent='Could not add stamp: '+e.message;
-            showWallet(0);
-            stripHashOnce();
-          }
-        }else{
-          // just show wallet
-          showWallet(0);
-        }
-        // register for pushes
-        if ('Notification' in window) {
-          window._ensureFCMRegistered && window._ensureFCMRegistered();
-        }
-      }else{
-        signupCard.style.display='block';
-        walletCard.style.display='none';
-      }
-    })();
-
-    // SIGNUP → store identifier in localStorage + cookie; if QR present, add stamp
-    joinBtn.addEventListener('click',async()=>{
-      const name=document.getElementById('name').value.trim()||null;
-      const email=document.getElementById('email').value.trim()||null;
-      const phone=document.getElementById('phone').value.trim()||null;
-      const identifier=email||phone;
-      if(!identifier){out.textContent='Please enter an email or phone.';return;}
-      out.textContent='Creating your PastaPass…';
-      try{
-        const signupRes=await apiSignup({name,email,phone});
-        setIdentifier(identifier);
-        let stamps=signupRes.wallet?.stamps||0;
-
-        if(tokenFromQR){
-          try{
-            const j=await apiAddStamp(identifier);
-            stamps=j.stamps||stamps;
-
-            if (j.redeemed) {
-              out.textContent = '✅ Free pasta redeemed! Your card has been reset.';
-              rewardEl.textContent = '';
-            } else if (j.ready) {
-              out.textContent = '🎉 Congratulations! You have a FREE pasta waiting. Show this to staff and scan once more to redeem.';
-              rewardEl.textContent = '🎉 Free pasta available';
-            } else {
-              out.textContent = 'Welcome! Stamp added.';
-              rewardEl.textContent = '';
-            }
-            stripHashOnce();
-          }catch(e){
-            out.textContent='Signed up. Could not add stamp: '+e.message;
-            rewardEl.textContent = '';
-            stripHashOnce();
-          }
-        }else{
-          out.textContent='Welcome! You are signed up.';
-          rewardEl.textContent = '';
-        }
-        showWallet(stamps);
-
-        // register for pushes
-        if ('Notification' in window) {
-          window._ensureFCMRegistered && window._ensureFCMRegistered();
-        }
-      }catch(e){
-        out.textContent='Error: '+e.message;
-      }
-    });
-  </script>
-</body>
-</html>
+// start
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`✅ PastaPass running at http://localhost:${PORT}`);
+  if (useTurso) {
+    console.log('🔗 DB: Turso (libSQL) via', process.env.TURSO_DATABASE_URL);
+  } else {
+    console.log('🔗 DB: Local SQLite (pasta.db)');
+  }
+});
